@@ -11,8 +11,10 @@ on:
     # Daily at 10:00 IST (4:30 UTC)
     - cron: '30 4 * * *'
 
-# Limit runtime to 5.5 hours
-timeout-minutes: 330
+# Define permissions explicitly (principle of least privilege)
+permissions:
+  contents: write  # Needed for git push
+  actions: write   # Needed for re-triggering workflow
 
 # Ensure only one workflow per profile runs at a time
 concurrency:
@@ -22,17 +24,24 @@ concurrency:
 jobs:
   rdp-miner:
     runs-on: windows-latest
+    # Limit runtime to 5.5 hours
+    timeout-minutes: 330
     env:
       PROFILE: ${{ github.event.inputs.profile || 'default' }}
+      # Set LiteManager credentials at job level so they're available to all steps
+      LITEMANAGER_ID: ${{ secrets.LITEMANAGER_ID }}
+      LITEMANAGER_PASS: ${{ secrets.LITEMANAGER_PASS }}
       
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        # Using specific commit hash for security (v3)
+        uses: actions/checkout@d50f8ea76748df49594d9b109b614f3b4db63c71
         with:
           persist-credentials: true
           
       - name: Cache installer dependencies
-        uses: actions/cache@v3
+        # Using specific commit hash for security (v3)
+        uses: actions/cache@4b0cf6cc4619e737324ddfcec08fff2413359514
         with:
           path: |
             ~\.chocolatey
@@ -56,6 +65,7 @@ jobs:
         run: |
           if "${{ secrets.LITEMANAGER_ID }}" NEQ "" if "${{ secrets.LITEMANAGER_PASS }}" NEQ "" (
             echo Setting LiteManager credentials from secrets
+            REM These are also set at the job level, but we set them here for compatibility
             set LITEMANAGER_ID=${{ secrets.LITEMANAGER_ID }}
             set LITEMANAGER_PASS=${{ secrets.LITEMANAGER_PASS }}
           )
@@ -91,7 +101,8 @@ jobs:
           git push
           
       - name: Upload logs as artifacts
-        uses: actions/upload-artifact@v3
+        # Using specific commit hash for security (v3)
+        uses: actions/upload-artifact@6673cd052c4cd6fcf4b4e6e60ea986c889389535
         with:
           name: miner-logs-${{ env.PROFILE }}
           path: miner-state/${{ env.PROFILE }}/logs/**/*.txt
