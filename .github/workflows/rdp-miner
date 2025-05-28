@@ -1,0 +1,129 @@
+name: RDP Miner Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Miner profile name'
+        required: true
+        default: 'default'
+  schedule:
+    # Daily at 10:00 IST (4:30 UTC)
+    - cron: '30 4 * * *'
+
+# Limit runtime to 5.5 hours
+timeout-minutes: 330
+
+# Ensure only one workflow per profile runs at a time
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.inputs.profile || 'default' }}
+  cancel-in-progress: false
+
+jobs:
+  rdp-miner:
+    runs-on: windows-latest
+    env:
+      PROFILE: ${{ github.event.inputs.profile || 'default' }}
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: true
+          
+      - name: Cache installer dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~\.chocolatey
+            ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-installer-${{ hashFiles('**/Downloads.bat') }}
+          restore-keys: |
+            ${{ runner.os }}-installer-
+            
+      - name: Clean up profile directory
+        shell: cmd
+        run: |
+          if exist "miner-state\${{ env.PROFILE }}" (
+            echo "Cleaning up existing profile directory: miner-state\${{ env.PROFILE }}"
+            rmdir /s /q "miner-state\${{ env.PROFILE }}"
+          )
+          mkdir "miner-state\${{ env.PROFILE }}"
+          mkdir "miner-state\${{ env.PROFILE }}\logs"
+          
+      - name: Set LiteManager credentials from secrets (if available)
+        shell: cmd
+        run: |
+          if "${{ secrets.LITEMANAGER_ID }}" NEQ "" if "${{ secrets.LITEMANAGER_PASS }}" NEQ "" (
+            echo Setting LiteManager credentials from secrets
+            set LITEMANAGER_ID=${{ secrets.LITEMANAGER_ID }}
+            set LITEMANAGER_PASS=${{ secrets.LITEMANAGER_PASS }}
+          )
+          
+      - name: Download and install LiteManager
+        shell: cmd
+        run: |
+          call Downloads.bat ${{ env.PROFILE }}
+        
+      - name: Connect to LiteManager
+        shell: cmd
+        run: |
+          call show.bat ${{ env.PROFILE }}
+          
+      - name: Run mining loop
+        shell: cmd
+        run: |
+          call loop.bat ${{ env.PROFILE }}
+          
+      - name: Clean up logs to prevent repository bloat
+        shell: cmd
+        run: |
+          call cleanup_logs.bat ${{ env.PROFILE }} 3 1024
+          
+      - name: Commit state back to repository
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add miner-state/${{ env.PROFILE }}/creds.txt
+          git add -f miner-state/${{ env.PROFILE }}/logs/*.txt
+          git add -f miner-state/${{ env.PROFILE }}/logs/*.log
+          git commit -m "Update miner state for profile ${{ env.PROFILE }}" || echo "No changes to commit"
+          git push
+          
+      - name: Upload logs as artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: miner-logs-${{ env.PROFILE }}
+          path: miner-state/${{ env.PROFILE }}/logs/**/*.txt
+          if-no-files-found: warn
+          
+      - name: Re-trigger workflow on success
+        if: success()
+        run: |
+          echo "Waiting 1 hour before re-triggering workflow..."
+          timeout /t 3600
+          
+          # Use GitHub API to re-trigger the workflow with the same profile
+          $headers = @{
+            "Authorization" = "token ${{ secrets.GITHUB_TOKEN }}"
+            "Accept" = "application/vnd.github.v3+json"
+          }
+          
+          $body = @{
+            "ref" = "${{ github.ref }}"
+            "inputs" = @{
+              "profile" = "${{ env.PROFILE }}"
+            }
+          } | ConvertTo-Json
+          
+          $workflowId = "${{ github.workflow }}"
+          $repoFullName = "${{ github.repository }}"
+          
+          Invoke-RestMethod -Uri "https://api.github.com/repos/$repoFullName/actions/workflows/$workflowId/dispatches" -Method Post -Headers $headers -Body $body -ContentType "application/json"
+          
+      - name: Report failure
+        if: failure()
+        run: |
+          echo "::error::Miner workflow failed for profile ${{ env.PROFILE }}"
+          echo "Miner workflow failed for profile ${{ env.PROFILE }}" >> $GITHUB_STEP_SUMMARY
+          echo "Check the logs for more details." >> $GITHUB_STEP_SUMMARY
