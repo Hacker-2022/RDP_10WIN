@@ -1,0 +1,49 @@
+# Ignore log files over 1MB to prevent repo bloat
+miner-state/**/*.log
+miner-state/**/*.txt
+!miner-state/**/creds.txt
+
+# Ignore temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# Ignore Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Ignore Windows specific files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Ignore downloaded installers
+*.zip
+*.exe
+*.msi
+
+# Keep specific files that should be tracked
+!loop.py
+!setup.py
